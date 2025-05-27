@@ -128,11 +128,16 @@ if a_fit is not None:
     )
 # Sample MainData directly from fitted Johnson SU, preserving skew
 if a_fit is not None and n1 > 0:
-    s1 = johnsonsu.rvs(
-        a_fit, b_fit, loc=loc_fit, scale=scale_fit, size=int(n1)
+    raw_s1 = johnsonsu.rvs(
+        a_fit, b_fit, loc=loc_fit, scale=scale_fit, size=int(n1*2)
     )
+    s1 = raw_s1[(raw_s1 >= min1) & (raw_s1 <= max1)]
+    # Pad/truncate to N, using min1 to pad
+    if len(s1) < n1:
+        s1 = np.pad(s1, (0, int(n1) - len(s1)), mode='constant', constant_values=min1)
+    else:
+        s1 = s1[:int(n1)]
 else:
-    s1 = np.array([])
     s1 = np.array([])
 # Sample LT10 and GT180 with normals for low and high outliers
 s2 = sample_norm(n2, mean2, sd2, min2, max2)
@@ -150,13 +155,30 @@ def main_plot():
     xmax = max(max_vals) if max_vals else new_benchmark
     bins = np.arange(0, xmax+bin_width, bin_width)
 
-    # Histograms
-    if s1.size>0:
-        ax.hist(
-            s1, bins=bins, density=True, alpha=0.6,
-            color='lightblue', edgecolor='black',
+    # Compute histograms for display
+    hist1, edges = np.histogram(s1, bins=bins, density=True) if s1.size>0 else (np.array([]), bins)
+    hist2, _     = np.histogram(s2, bins=bins, density=True) if s2.size>0 else (np.array([]), bins)
+    hist3, _     = np.histogram(s3, bins=bins, density=True) if s3.size>0 else (np.array([]), bins)
+
+    # Determine peak of others and scale hist1 to 80% of larger peak
+    peak_others = 0
+    if hist2.size>0:
+        peak_others = max(peak_others, hist2.max())
+    if hist3.size>0:
+        peak_others = max(peak_others, hist3.max())
+    scale1 = 1.0
+    if hist1.size>0 and peak_others>0:
+        scale1 = 0.8 * peak_others / hist1.max()
+
+    # Plot scaled MainData bars
+    if hist1.size>0:
+        ax.bar(
+            edges[:-1], hist1*scale1, width=bin_width,
+            align='edge', alpha=0.6, color='lightblue', edgecolor='black',
             label=f'MainData (N={n1})'
         )
+
+    # Plot LT10 and GT180 as usual
     if s2.size>0:
         ax.hist(
             s2, bins=bins, density=True, alpha=0.6,
@@ -173,19 +195,10 @@ def main_plot():
     # JSU density
     if large_sample.size>0:
         x_vals = np.linspace(0, xmax, 1000)
-        y_vals = johnsonsu.pdf(
-            x_vals, a_fit, b_fit, loc=loc_fit, scale=scale_fit
-        )
-        ax.plot(
-            x_vals, y_vals, ':', color='black', linewidth=2,
-            label='Large-N JSU fit'
-        )
-        ax.axvline(
-            median1, color='black', linestyle='--',
-            label=f'Median MainData = {median1}'
-        )
-
-    # Benchmarks
+        y_vals = johnsonsu.pdf(x_vals, a_fit, b_fit, loc=loc_fit, scale=scale_fit)
+        y_vals = y_vals * scale1
+        ax.plot(x_vals, y_vals, ':', color='black', linewidth=2, label='Large-N JSU fit')
+        ax.axvline(median1, color='black', linestyle='--', label=f'Median MainData = {median1}')    # Benchmarks
     ax.axvline(
         current_benchmark, color='blue', linestyle='--',
         label=f'Current Benchmark = {current_benchmark}'
@@ -203,3 +216,4 @@ def main_plot():
 # Render
 fig = main_plot()
 st.pyplot(fig)
+
