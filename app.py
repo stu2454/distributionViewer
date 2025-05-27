@@ -126,7 +126,15 @@ if a_fit is not None:
     large_sample = johnsonsu.rvs(
         a_fit, b_fit, loc=loc_fit, scale=scale_fit, size=1000000
     )
-s1 = sample_norm(n1, mean1, sd1, min1, max1)
+# Sample MainData directly from fitted Johnson SU, preserving skew
+if a_fit is not None and n1 > 0:
+    s1 = johnsonsu.rvs(
+        a_fit, b_fit, loc=loc_fit, scale=scale_fit, size=int(n1)
+    )
+else:
+    s1 = np.array([])
+    s1 = np.array([])
+# Sample LT10 and GT180 with normals for low and high outliers
 s2 = sample_norm(n2, mean2, sd2, min2, max2)
 s3 = sample_norm(n3, mean3, sd3, min3, max3)
 
