@@ -5,6 +5,9 @@ from scipy.stats import johnsonsu
 
 # Ensure white backgrounds
 plt.style.use('default')
+# Force figure and axis facecolors to white
+plt.rcParams['figure.facecolor'] = 'white'
+plt.rcParams['axes.facecolor'] = 'white'
 
 st.set_page_config(page_title="Distribution Explorer", layout="wide")
 st.title("Interactive Payment Distribution Explorer")
@@ -95,6 +98,9 @@ def fit_jsu(m, v, skew, kurt_ex):
     return sol.x
 
 # Fit parameters for large distribution
+from scipy.stats import johnsonsu  # ensure import
+from scipy.optimize import root
+
 target_variance = sd1 ** 2
 a_fit, b_fit, loc_fit, scale_fit = fit_jsu(mean1, target_variance, skew1, kurt1)
 
@@ -103,88 +109,100 @@ large_sample = johnsonsu.rvs(
     a_fit, b_fit, loc=loc_fit, scale=scale_fit, size=int(1e6)
 )
 # Sample MainData, LT10, GT180
-raw_s1 = np.random.normal(loc=mean1, scale=sd1, size=int(n1*2))  # oversample to ensure enough after filtering
+raw_s1 = np.random.normal(loc=mean1, scale=sd1, size=int(n1*2))  # oversample to ensure enough
 raw_s2 = np.random.normal(loc=mean2, scale=sd2, size=int(n2*2))
 raw_s3 = np.random.normal(loc=mean3, scale=sd3, size=int(n3*2))
 
-# Enforce non-overlap between LT10 and MainData at boundary
-# Use max2 (upper bound of LT10) as exclusive boundary
-boundary = max2
-
-# LT10 distribution: values between min2 and boundary (exclusive)
+# Enforce non-overlap at boundary
+boundary = max2  # exclusive upper bound for LT10
 s2 = raw_s2[(raw_s2 >= min2) & (raw_s2 < boundary)]
-# MainData distribution: values between boundary and max1 (exclusive of boundary)
 s1 = raw_s1[(raw_s1 > boundary) & (raw_s1 <= max1)]
-# GT180 distribution: values between min3 and max3
 s3 = raw_s3[(raw_s3 >= min3) & (raw_s3 <= max3)]
 
-# If filtering removed too many samples, pad/truncate to requested N
-if len(s1) < n1:
-    s1 = np.pad(s1, (0, int(n1 - len(s1))), mode='wrap')
-else:
-    s1 = s1[:int(n1)]
+# Pad/truncate to requested N
+# Use constant padding to avoid wrap errors on empty arrays
+def pad_array(arr, n, pad_val):
+    if len(arr) < n:
+        return np.pad(arr, (0, n - len(arr)), mode='constant', constant_values=pad_val)
+    return arr[:n]
 
-if len(s2) < n2:
-    s2 = np.pad(s2, (0, int(n2 - len(s2))), mode='wrap')
-else:
-    s2 = s2[:int(n2)]
-
-if len(s3) < n3:
-    s3 = np.pad(s3, (0, int(n3 - len(s3))), mode='wrap')
-else:
-    s3 = s3[:int(n3)]
+s1 = pad_array(s1, int(n1), boundary)
+s2 = pad_array(s2, int(n2), min2)
+s3 = pad_array(s3, int(n3), min3)
 
 # Plot
 def main_plot():
     fig, ax = plt.subplots(figsize=(10, 6))
+    # Ensure white background
     fig.patch.set_facecolor('white')
     ax.set_facecolor('white')
 
-    bins = np.arange(
-        0,
-        max(s3.max(), s1.max(), s2.max(), large_sample.max()) + bin_width,
-        bin_width,
-    )
+    # Determine x-axis max
+    arrays = [large_sample, s1, s2, s3]
+    valid_max = [arr.max() for arr in arrays if arr.size > 0]
+    xmax = max(valid_max) if valid_max else current_benchmark
+    bins = np.arange(0, xmax + bin_width, bin_width)
 
-    ax.hist(
-        s1,
-        bins=bins,
-        density=True,
-        alpha=0.6,
-        color='lightblue',
-        edgecolor='black',
-        label=f'MainData (N={n1})',
-    )
-    ax.hist(
-        s2,
-        bins=bins,
-        density=True,
-        alpha=0.6,
-        color='darkblue',
-        edgecolor='black',
-        label=f'LT10 (N={n2})',
-    )
-    ax.hist(
-        s3,
-        bins=bins,
-        density=True,
-        alpha=0.6,
-        color='orange',
-        edgecolor='black',
-        label=f'GT180 (N={n3})',
-    )
+    # Plot histograms
+    if s1.size > 0:
+        ax.hist(
+            s1,
+            bins=bins,
+            density=True,
+            alpha=0.6,
+            color='lightblue',
+            edgecolor='black',
+            label=f'MainData (N={n1})',
+        )
+    if s2.size > 0:
+        ax.hist(
+            s2,
+            bins=bins,
+            density=True,
+            alpha=0.6,
+            color='darkblue',
+            edgecolor='black',
+            label=f'LT10 (N={n2})',
+        )
+    if s3.size > 0:
+        ax.hist(
+            s3,
+            bins=bins,
+            density=True,
+            alpha=0.6,
+            color='orange',
+            edgecolor='black',
+            label=f'GT180 (N={n3})',
+        )
 
-    x = np.linspace(0, bins[-1], 1000)
-    y = johnsonsu.pdf(x, a_fit, b_fit, loc=loc_fit, scale=scale_fit)
-    ax.plot(x, y, linestyle=':', color='black', linewidth=2, label='Large-N JSU fit')
+    # Plot JSU density
+    if large_sample.size > 0:
+        x_vals = np.linspace(0, xmax, 1000)
+        y_vals = johnsonsu.pdf(x_vals, a_fit, b_fit, loc=loc_fit, scale=scale_fit)
+        ax.plot(
+            x_vals,
+            y_vals,
+            linestyle=':',
+            color='black',
+            linewidth=2,
+            label='Large-N JSU fit',
+        )
+        # Median
+        median_val = johnsonsu.ppf(
+            0.5,
+            a_fit,
+            b_fit,
+            loc=loc_fit,
+            scale=scale_fit,
+        )
+        ax.axvline(
+            median_val,
+            color='black',
+            linestyle='--',
+            label=f'Median (large N) = {median_val:.0f}',
+        )
 
-    median_large = johnsonsu.ppf(0.5, a_fit, b_fit, loc=loc_fit, scale=scale_fit)
-    ax.axvline(
-        median_large,
-        color='black',
-        linestyle='--',
-        label=f'Median (large N) = {median_large:.0f}',
-    )
+    # Benchmark lines
     ax.axvline(
         current_benchmark,
         color='blue',
@@ -203,5 +221,6 @@ def main_plot():
     ax.legend(loc='upper right')
     return fig
 
+# Render plot
 fig = main_plot()
 st.pyplot(fig)
